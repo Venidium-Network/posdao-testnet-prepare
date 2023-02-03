@@ -8,6 +8,7 @@ const hexgen = require('hex-generator');
 const publicIp = require('public-ip');
 const secp256k1 = require('secp256k1');
 const solc = require('solc');
+const util = require('util');
 const Web3 = require('web3');
 const web3 = new Web3();
 const BN = web3.utils.BN;
@@ -18,7 +19,9 @@ const nodesSpecFilePath = `${nodesDirectory}/spec.json`;
 main();
 
 async function main() {
+  // const resolver = util.promisify(require('dns').resolve4);
   const externalIP = await publicIp.v4();
+  // const externalIP = (await resolver('host.docker.internal'))[0];
   const setEnvContent = fs.readFileSync(`${__dirname}/../scripts/set-env.sh`, 'utf8')
   const networkName = setEnvContent.match(/NETWORK_NAME=([a-zA-Z0-9]+)/)[1];
   const ownerAddress = setEnvContent.match(/OWNER=([a-fA-F0-9x]+)/)[1];
@@ -40,14 +43,14 @@ async function main() {
   // Correct existing options in spec
   spec.genesis.gasLimit = '30000000';
 
-  // Add London hard fork options
-  spec.params.eip1559Transition = "30";
-  spec.params.eip3198Transition = "0";
-  spec.params.eip3529Transition = "0";
-  spec.params.eip3541Transition = "0";
-  spec.params.eip1559BaseFeeMaxChangeDenominator = "0x8";
-  spec.params.eip1559ElasticityMultiplier = "0x2";
-  spec.params.eip1559BaseFeeInitialValue = "0x3b9aca00";
+  // // Add London hard fork options
+  // spec.params.eip1559Transition = "30";
+  // spec.params.eip3198Transition = "0";
+  // spec.params.eip3529Transition = "0";
+  // spec.params.eip3541Transition = "0";
+  // spec.params.eip1559BaseFeeMaxChangeDenominator = "0x8";
+  // spec.params.eip1559ElasticityMultiplier = "0x2";
+  // spec.params.eip1559BaseFeeInitialValue = "0x3b9aca00";
 
   // Generate Enode URLs
   spec.nodes = [];
@@ -66,8 +69,7 @@ async function main() {
   } catch (e) {}
   fs.writeFileSync(nodesSpecFilePath, JSON.stringify(spec, null, '  '), 'utf8');
 
-  const OPENETHEREUM_IMAGE = 'xdaichain/openethereum:v3.3.0-rc.9';
-  const NETHERMIND_IMAGE = 'nethermindeth/nethermind:psb';
+  const NETHERMIND_IMAGE = 'nethermind/nethermind:latest';
 
   // Prepare docker-compose.yml for Netstat
   const ETHSTATS_SECRET = pwdgen.generate({ length: 10, numbers: true });
@@ -114,80 +116,7 @@ services:
 
     let nodeYmlContent;
 
-    if (n % 2 == 0) {
-      fs.writeFileSync(`${nodeDirectory}/password`, 'testnetpoa', 'utf8');
-      fs.writeFileSync(`${nodeDirectory}/key.json`, privateKeyJson, 'utf8');
-      nodeYmlContent = `
-version: '3.7'
-services:
-  openethereum:
-    init: true
-    container_name: ${networkName}-validator${n+1}
-    image: ${OPENETHEREUM_IMAGE}
-    user: root
-    command:
-      --chain="/root/spec.json"
-      --nat="extip:${externalIP}"
-      --port=3030${n+1}
-      --base-path=/root/data
-      --max-peers=100
-      --unlock="${address}"
-      --password="/root/password"
-      --node-key="${privateKey}"
-      --min-gas-price=1000000000
-      --gas-floor-target=${spec.genesis.gasLimit}
-      --engine-signer="${address}"
-      --force-sealing
-      --fast-unlock
-      --jsonrpc-port=8545
-      --jsonrpc-cors=all
-      --jsonrpc-interface=all
-      --jsonrpc-hosts=all
-      --jsonrpc-apis=web3,eth,net,parity
-      --logging="engine=trace,miner=trace"
-    volumes:
-      - ../spec.json:/root/spec.json:ro
-      - ./data:/root/data
-      - ./password:/root/password
-      - ./key.json:/root/data/keys/${networkName}/key:ro
-    expose:
-      - "8545"
-    ports:
-      - "3030${n+1}:3030${n+1}"
-      - "3030${n+1}:3030${n+1}/udp"
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "10"
-  agent:
-    init: true
-    container_name: ${networkName}-ethstats${n+1}
-    image: xdaichain/ethstats-agent:latest
-    links:
-      - "openethereum"
-    depends_on:
-      - "openethereum"
-    environment:
-      NODE_ENV: production
-      RPC_HOST: openethereum
-      RPC_PORT: 8545
-      LISTENING_PORT: 3030${n+1}
-      CONTACT_DETAILS: "security@poanetwork.com"
-      INSTANCE_NAME: "${ethstatsName}"
-      WS_SERVER: "ws://${externalIP}:${ethstatsPort}/api"
-      WS_SECRET: "${ETHSTATS_SECRET}"
-      VERBOSITY: 1
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1m"
-        max-file: "10"
-      `.trim();
-    } else {
-      nodeYmlContent = `
+    nodeYmlContent = `
 version: '3.7'
 services:
   nethermind:
@@ -208,19 +137,17 @@ services:
       NETHERMIND_INITCONFIG_CHAINSPECPATH: "/nethermind/spec.json"
       NETHERMIND_INITCONFIG_ISMINING: "true"
       NETHERMIND_INITCONFIG_STORERECEIPTS: "false"
+      NETHERMIND_JSONRPCCONFIG_ENABLED: "true"
+      NETHERMIND_JSONRPCCONFIG_ENABLEDMODULES: "[Eth,Net]"
+      NETHERMIND_JSONRPCCONFIG_HOST: 0.0.0.0
+      NETHERMIND_JSONRPCCONFIG_PORT: 8545
+      NETHERMIND_JSONRPCCONFIG_ADDITIONALRPCURLS: http://0.0.0.0:8545
       NETHERMIND_KEYSTORECONFIG_TESTNODEKEY: "${privateKey}"
-      NETHERMIND_METRICSCONFIG_ENABLED: "true"
-      NETHERMIND_METRICSCONFIG_NODENAME: "${ethstatsName}"
-      NETHERMIND_METRICSCONFIG_PUSHGATEWAYURL: https://metrics.nethermind.io/metrics/validators-Ifa0eigee0deigah8doo5aisaeNa8huichahk5baip2daitholaeh4xiey0iec1vai6Nahxae1aeregul5Diehae7aeThengei7X
-      NETHERMIND_METRICSCONFIG_INTERVALSECONDS: 30
       NETHERMIND_MININGCONFIG_MINGASPRICE: "1000000000"
       NETHERMIND_MININGCONFIG_TARGETBLOCKGASLIMIT: "${spec.genesis.gasLimit}"
       NETHERMIND_NETWORKCONFIG_DISCOVERYPORT: 3030${n+1}
       NETHERMIND_NETWORKCONFIG_P2PPORT: 3030${n+1}
       NETHERMIND_PRUNINGCONFIG_ENABLED: "true"
-      NETHERMIND_SEQCONFIG_MINLEVEL: "Info"
-      NETHERMIND_SEQCONFIG_SERVERURL: "https://seq.nethermind.io"
-      NETHERMIND_SEQCONFIG_APIKEY: "${process.env.SEQAPIKEY}"
       NETHERMIND_SYNCCONFIG_FASTSYNC: "false"
       NETHERMIND_SYNCCONFIG_FASTBLOCKS: "false"
       NETHERMIND_SYNCCONFIG_DOWNLOADBODIESINFASTSYNC: "false"
@@ -237,6 +164,7 @@ services:
       - ./data/keystore:/nethermind/keystore
       - ./data/nethermind_db:/nethermind/nethermind_db
     ports:
+      - "127.0.0.1:864${n+1}:8545"
       - "3030${n+1}:3030${n+1}"
       - "3030${n+1}:3030${n+1}/udp"
     restart: unless-stopped
@@ -259,7 +187,6 @@ services:
 #        max-size: "10m"
 #        max-file: "10"
       `.trim();
-    }
 
     fs.writeFileSync(`${nodeDirectory}/docker-compose.yml`, nodeYmlContent, 'utf8');
   }
@@ -298,16 +225,9 @@ services:
       NETHERMIND_JSONRPCCONFIG_REPORTINTERVALSECONDS: 600
       NETHERMIND_JSONRPCCONFIG_WEBSOCKETSPORT: 8546
       NETHERMIND_KEYSTORECONFIG_ENODEKEYFILE: "/nethermind/enode.key"
-      NETHERMIND_METRICSCONFIG_ENABLED: "true"
-      NETHERMIND_METRICSCONFIG_INTERVALSECONDS: 30
-      NETHERMIND_METRICSCONFIG_NODENAME: "${archiveEthstatsName}"
-      NETHERMIND_METRICSCONFIG_PUSHGATEWAYURL: https://metrics.nethermind.io/metrics/validators-Ifa0eigee0deigah8doo5aisaeNa8huichahk5baip2daitholaeh4xiey0iec1vai6Nahxae1aeregul5Diehae7aeThengei7X
       NETHERMIND_NETWORKCONFIG_EXTERNALIP: ${externalIP}
       NETHERMIND_NETWORKCONFIG_DISCOVERYPORT: 30300
       NETHERMIND_NETWORKCONFIG_P2PPORT: 30300
-      NETHERMIND_SEQCONFIG_MINLEVEL: "Info"
-      NETHERMIND_SEQCONFIG_SERVERURL: "https://seq.nethermind.io"
-      NETHERMIND_SEQCONFIG_APIKEY: "${process.env.SEQAPIKEY}"
       NETHERMIND_SYNCCONFIG_FASTSYNC: "false"
       NETHERMIND_SYNCCONFIG_FASTBLOCKS: "true"
       NETHERMIND_SYNCCONFIG_FASTSYNCCATCHUPHEIGHTDELTA: 100000
@@ -320,8 +240,8 @@ services:
       - ./data/nethermind_db:/nethermind/nethermind_db
       - ./enode.key:/nethermind/enode.key:ro
     ports:
-      - "8545:8545"
-      - "8546:8546"
+      - "${externalIP}:8545:8545"
+      - "${externalIP}:8546:8546"
       - "30300:30300"
       - "30300:30300/udp"
     restart: unless-stopped
@@ -340,26 +260,26 @@ services:
 #!/bin/bash
 docker pull swarmpit/ethstats:latest
 docker pull ${NETHERMIND_IMAGE}
-docker pull ${OPENETHEREUM_IMAGE}
-docker pull xdaichain/ethstats-agent:latest
-cd ./ethstats; docker-compose up -d; cd -
+#docker pull xdaichain/ethstats-agent:latest
+cd ./ethstats; docker compose up -d& cd -
 sleep 5
 for i in $(seq 1 ${miningAddresses.length}); do
-  cd ./validator$\{i\}; docker-compose up -d; cd -
-  sleep 3
+  cd ./validator$\{i\}; docker compose up -d& cd -
 done
-cd ./archive; docker-compose up -d; cd -
+cd ./archive; docker compose up -d& cd -
+wait
   `.trim();
   fs.writeFileSync(`${nodesDirectory}/run_all.sh`, runAllShContent, 'utf8');
 
   // Make `nodes/stop_all.sh` script
   const stopAllShContent = `
 #!/bin/bash
-cd ./ethstats; docker-compose down; cd -
+cd ./ethstats; docker compose down& cd -
 for i in $(seq 1 ${miningAddresses.length}); do
-  cd ./validator$\{i\}; docker-compose down; cd -
+  cd ./validator$\{i\}; docker compose down& cd -
 done
-cd ./archive; docker-compose down; cd -
+cd ./archive; docker compose down& cd -
+wait
   `.trim();
   fs.writeFileSync(`${nodesDirectory}/stop_all.sh`, stopAllShContent, 'utf8');
 }
@@ -385,6 +305,7 @@ function compileStakingTokenContract() {
 }
 
 async function deployStakingToken(ownerAddress) {
+  /*
   let spec = fs.readFileSync(nodesSpecFilePath, 'utf8');
   spec = JSON.parse(spec);
   const validatorSetAuRaAddress = spec.engine.authorityRound.params.validators.multi["0"].contract;
@@ -499,4 +420,6 @@ async function deployStakingToken(ownerAddress) {
   } else if (!stakingEpoch.isZero()) {
     console.log('The number of the current staking epoch is not zero, so it is too late to make initial stakes. Skipping this step');
   }
+  */
+  console.log("skipping token deployment");
 }
