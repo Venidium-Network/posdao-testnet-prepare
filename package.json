@@ -5,8 +5,8 @@
   "scripts": {
     "before-start": "npm i && npm run get-all-submodules && npm run prepare-env",
     "start": "npm run before-start && npm run make-spec && npm run start-preparation",
-    "get-all-submodules": "git submodule update --init --remote",
-    "make-spec": ". ./scripts/set-env.sh && cd ./posdao-contracts && npm i && node ./scripts/make_spec.js",
+    "get-all-submodules": "#git submodule update --init --remote",
+    "make-spec": ". ./scripts/set-env.sh && cd ./posdao-contracts && npm i && node ./scripts/make_spec.js && cd .. && node ./scripts/copy-spec.js && cd ./posdao-contracts",
     "prepare-env": "node ./scripts/prepare-env.js",
     "start-preparation": "node ./scripts/start-preparation.js",
     "cleanup": "rm -f ./scripts/set-env.sh ./posdao-contracts/spec.json && rm -rf ./keys ./nodes/* ./nodes ./compose/nodes"
