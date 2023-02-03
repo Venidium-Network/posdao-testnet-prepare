@@ -1,4 +1,4 @@
 [submodule "posdao-contracts"]
 	path = posdao-contracts
-	url = https://github.com/poanetwork/posdao-contracts
+	url = https://github.com/Venidium-Network/posdao-contracts.git
 	branch = master
